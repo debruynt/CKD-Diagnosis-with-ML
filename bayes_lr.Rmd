@@ -1,0 +1,152 @@
+---
+title: "bayes_lr"
+author: "Travis DeBruyn"
+date: "2025-04-13"
+output: html_document
+---
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, message = FALSE, warning = FALSE)
+```
+
+```{r packages}
+if (!require("pacman")) install.packages("pacman")
+pacman::p_load(
+  tidyverse,    
+  rstan,        
+  bayesplot,    
+  rstanarm,     
+  caret,        
+  kableExtra    
+)
+```
+
+```{r load_data}
+ckd_clean <- read.csv("data/ckd_clean.csv")
+ckd_new <- read.csv("data/ckd_new.csv")
+
+names(ckd_clean) <- names(ckd_new)
+
+ckd_combined <- rbind(ckd_clean, ckd_new)
+
+ckd_combined <- unique(ckd_combined)
+
+str(ckd_combined)
+summary(ckd_combined)
+sum(is.na(ckd_combined))
+
+table(ckd_combined$class)
+```
+
+
+
+```{r preprocessing}
+preprocess_params <- preProcess(ckd_combined[, -ncol(ckd_combined)], method = c("center", "scale"))
+ckd_scaled <- predict(preprocess_params, ckd_combined)
+
+set.seed(14)
+train_index <- createDataPartition(ckd_scaled$class, p = 0.8, list = FALSE)
+train_data <- ckd_scaled[train_index, ]
+test_data <- ckd_scaled[-train_index, ]
+```
+
+## Bayesian Logistic Regression Model
+
+```{r model_fit}
+bayes_model <- stan_glm(
+  formula,
+  data = train_data,
+  family = binomial(link = "logit"),
+  prior = normal(0, 2.5),  
+  prior_intercept = normal(0, 2.5),
+  chains = 4,              
+  iter = 2000,             
+  warmup = 1000,           
+  seed = 123
+)
+
+print(bayes_model, digits = 3)
+```
+
+```{r diagnostics}
+mcmc_trace(bayes_model)
+
+model_summary <- summary(bayes_model, probs = c(0.025, 0.975))
+
+print(model_summary)
+
+rhat_values <- bayes_model$stan_summary[,"Rhat"]
+print(paste("Maximum R-hat:", max(rhat_values, na.rm = TRUE)))
+
+ess_values <- bayes_model$stan_summary[,"n_eff"]
+print(paste("Minimum effective sample size:", min(ess_values, na.rm = TRUE)))
+```
+
+
+```{r posterior}
+posterior <- as.matrix(bayes_model)
+
+mcmc_areas(posterior, 
+           pars = c("(Intercept)", names(ckd_data)[1:5]),
+           prob = 0.95) +
+  ggtitle("Posterior Distributions of Coefficients")
+
+posterior_summary <- summary(bayes_model, probs = c(0.025, 0.975))
+print(posterior_summary)
+```
+
+```{r evaluation}
+# get predictions on test set
+pred_probs <- posterior_epred(bayes_model, newdata = test_data)
+pred_class <- ifelse(colMeans(pred_probs) > 0.5, 1, 0)
+
+conf_matrix <- confusionMatrix(factor(pred_class), factor(test_data$class))
+print(conf_matrix)
+```
+
+```{r feature_importance}
+feature_importance <- data.frame(
+  Feature = names(ckd_data)[-ncol(ckd_data)],
+  Mean = colMeans(posterior[, -1]),
+  Lower = apply(posterior[, -1], 2, quantile, 0.025),
+  Upper = apply(posterior[, -1], 2, quantile, 0.975)
+)
+
+feature_importance <- feature_importance[order(-abs(feature_importance$Mean)), ]
+
+# plot
+ggplot(feature_importance, aes(x = reorder(Feature, Mean), y = Mean)) +
+  geom_point() +
+  geom_errorbar(aes(ymin = Lower, ymax = Upper), width = 0.2) +
+  coord_flip() +
+  labs(title = "Feature Importance with 95% Credible Intervals",
+       x = "Features",
+       y = "Coefficient Value") +
+  theme_minimal()
+```
+
+```{r overfitting_check}
+coef_summary <- as.data.frame(bayes_model$stan_summary)
+coef_summary <- coef_summary[!rownames(coef_summary) %in% c("sigma", "mean_PPD", "log-posterior"), ]
+cat("\nSummary of coefficient magnitudes:\n")
+print(summary(abs(coef_summary$mean)))
+
+set.seed(14)
+cv_results <- train(
+  formula,
+  data = ckd_scaled,
+  method = "glm",
+  family = "binomial",
+  trControl = trainControl(
+    method = "cv",
+    number = 5,
+    savePredictions = TRUE
+  )
+)
+cat("\nCross-val results:\n")
+print(cv_results$results)
+
+train_preds <- posterior_epred(bayes_model, newdata = train_data)
+train_acc <- mean(ifelse(colMeans(train_preds) > 0.5, 1, 0) == train_data$class)
+cat("\nTraining accuracy:", train_acc, "\n")
+cat("Test accuracy:", conf_matrix$overall["Accuracy"], "\n")
+```
