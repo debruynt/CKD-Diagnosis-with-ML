@@ -1,6 +1,5 @@
 import numpy as np
 import pandas as pd
-import matplotlib.pyplot as plt
 from sklearn.model_selection import train_test_split
 from sklearn.preprocessing import StandardScaler
 import pickle
@@ -8,31 +7,32 @@ import pickle
 def sigmoid(x):
     return 1 / (1 + np.exp(-x))
 
-def sigmoid_d(x):
+def sigmoidDerivative(x):
     return x * (1 - x)
 
 def relu(x):
     return np.maximum(0, x)
 
-def relu_d(x):
+def reluDerivative(x):
     return (x > 0).astype(float)
 
+# dictionary to map out activation functions; used when I was testing various combinations of hidden layers
 ACTIVATIONS = {
-    "sigmoid": (sigmoid, sigmoid_d),
-    "relu": (relu, relu_d),
+    "sigmoid": (sigmoid, sigmoidDerivative),
+    "relu": (relu, reluDerivative),
 }
 
 def binary_cross_entropy(y_true, y_pred):
-    epsilon = 1e-8
-    return -np.mean(y_true * np.log(y_pred + epsilon) + (1 - y_true) * np.log(1 - y_pred + epsilon))
+    return -np.mean(y_true * np.log(y_pred + 1e-8) + (1 - y_true) * np.log(1 - y_pred + 1e-8))
 
-def binary_cross_entropy_d(y_true, y_pred):
-    epsilon = 1e-8
-    return (y_pred - y_true) / ((y_pred * (1 - y_pred)) + epsilon)
+def binary_cross_entropyDerivative(y_true, y_pred):
+    return (y_pred - y_true) / ((y_pred * (1 - y_pred)) + 1e-8)
 
+# ridge penatly
 def l2_penalty(weights, alpha=0.001):
     return alpha * sum(np.sum(w ** 2) for w in weights)
 
+# main class, import for streamlit
 class MLPBinaryClassifier:
     def __init__(self, input_size, hidden_layers, activations, 
                  dropout_rates=None, learning_rate=0.01, epochs=1000, l2_lambda=0.001):
@@ -65,6 +65,7 @@ class MLPBinaryClassifier:
             self.activation_funcs.append(activation_fn)
             self.activation_derivatives.append(activation_deriv)
 
+    # feedforward
     def forward(self, X, training=False):
         activations = [X]
         dropout_masks = []
@@ -90,11 +91,12 @@ class MLPBinaryClassifier:
 
         return activations, dropout_masks
 
+    # backpropagration
     def backward(self, activations, y, dropout_masks):
         grads_w = []
         grads_b = []
         
-        delta = binary_cross_entropy_d(y, activations[-1]) * self.activation_derivatives[-1](activations[-1])
+        delta = binary_cross_entropyDerivative(y, activations[-1]) * self.activation_derivatives[-1](activations[-1])
 
         for i in reversed(range(len(self.weights))):
             grads_w.insert(0, np.dot(activations[i].T, delta))
@@ -111,6 +113,7 @@ class MLPBinaryClassifier:
             self.weights[i] -= self.learning_rate * grads_w[i]
             self.biases[i] -= self.learning_rate * grads_b[i]
 
+    # leave X_val and y_val alone if no validation needed
     def train(self, X, y, X_val=None, y_val=None):
         for epoch in range(self.epochs):
             activations, dropout_masks = self.forward(X, training=True)
@@ -133,15 +136,6 @@ class MLPBinaryClassifier:
 
     def predict(self, X):
         return (self.forward(X)[0][-1] > 0.5).astype(int)
-
-    def loss(self):
-        plt.plot(self.train_losses, label="Train Loss")
-        plt.plot(self.val_losses, label="Validation Loss")
-        plt.xlabel("Epoch")
-        plt.ylabel("Loss")
-        plt.title("Loss Curve")
-        plt.legend()
-        plt.show()
 
 df = pd.read_csv('data/ckd_clean.csv')
 
