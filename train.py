@@ -8,25 +8,25 @@ import pickle
 def sigmoid(x):
     return 1 / (1 + np.exp(-x))
 
-def sigmoid_derivative(x):
+def sigmoid_d(x):
     return x * (1 - x)
 
 def relu(x):
     return np.maximum(0, x)
 
-def relu_derivative(x):
+def relu_d(x):
     return (x > 0).astype(float)
 
 ACTIVATIONS = {
-    "sigmoid": (sigmoid, sigmoid_derivative),
-    "relu": (relu, relu_derivative),
+    "sigmoid": (sigmoid, sigmoid_d),
+    "relu": (relu, relu_d),
 }
 
 def binary_cross_entropy(y_true, y_pred):
     epsilon = 1e-8
     return -np.mean(y_true * np.log(y_pred + epsilon) + (1 - y_true) * np.log(1 - y_pred + epsilon))
 
-def binary_cross_entropy_derivative(y_true, y_pred):
+def binary_cross_entropy_d(y_true, y_pred):
     epsilon = 1e-8
     return (y_pred - y_true) / ((y_pred * (1 - y_pred)) + epsilon)
 
@@ -94,7 +94,7 @@ class MLPBinaryClassifier:
         grads_w = []
         grads_b = []
         
-        delta = binary_cross_entropy_derivative(y, activations[-1]) * self.activation_derivatives[-1](activations[-1])
+        delta = binary_cross_entropy_d(y, activations[-1]) * self.activation_derivatives[-1](activations[-1])
 
         for i in reversed(range(len(self.weights))):
             grads_w.insert(0, np.dot(activations[i].T, delta))
@@ -134,7 +134,7 @@ class MLPBinaryClassifier:
     def predict(self, X):
         return (self.forward(X)[0][-1] > 0.5).astype(int)
 
-    def plot_loss(self):
+    def loss(self):
         plt.plot(self.train_losses, label="Train Loss")
         plt.plot(self.val_losses, label="Validation Loss")
         plt.xlabel("Epoch")
